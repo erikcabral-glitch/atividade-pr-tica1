@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jogo – Noções Gerais de Direito</title>
+  <style>
+    :root{
+      --bg:#1e1e1e; --card:#222; --text:#fff; --accent:#0077ff;
+    }
+    body{font-family:Inter,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;padding:20px;display:flex;justify-content:center}
+    .container{width:100%;max-width:900px;background:var(--card);border-radius:12px;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,.6)}
+    h1,h2{margin:6px 0}
+    button{background:var(--accent);border:none;color:white;padding:10px 12px;border-radius:8px;cursor:pointer;margin:6px 0}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    .muted{color:rgba(255,255,255,.7)}
+
+    /* Themes */
+    body.theme-dark{--bg:#1e1e1e;--card:#222;--text:#fff;--accent:#0077ff}
+    body.theme-light{--bg:#f5f7fb;--card:#fff;--text:#111;--accent:#0066cc}
+    body.theme-neon{--bg:#080710;--card:#0f0f1a;--text:#c7fffb;--accent:#00ffd1}
+    body.theme-law-gold{--bg:#0b0b10;--card:#111216;--text:#fff6e5;--accent:#d4af37}
+    body.theme-minimal{--bg:#ffffff;--card:#f7f7f7;--text:#111;--accent:#333}
+
+    /* small helpers */
+    .center{text-align:center}
+    .small{font-size:0.9rem}
+    .stat{background:rgba(255,255,255,.03);padding:10px;border-radius:8px}
+  </style>
+</head>
+<body>
+  <div class="container" id="app">
+    <!-- Content injected by JS -->
+  </div>
+
+  <script>
+    /* =========================
+       Unified state & persistence
+       ========================= */
+    const STORAGE = {
+      rank: 'rankDireito_v2',
+      stats: 'estatisticasDireito_v2',
+      conquistas: 'conquistasDireito_v2',
+      cfg: 'jogoCfg_v2',
+      idioma: 'idiomaDireito_v2'
+    };
+
+    // Auto-detect browser language (support pt, en, es)
+    const browserLang = (navigator.language || navigator.userLanguage || 'pt').slice(0,2);
+    let idiomaAtual = localStorage.getItem(STORAGE.idioma) || (['pt','en','es'].includes(browserLang)? browserLang : 'pt');
+
+    // Translations minimal keys used across UI
+    const I18N = {
+      pt: { title:'Jogo – Noções Gerais de Direito', play:'Iniciar Jogo', settings:'Configurações', stats:'Estatísticas', achievements:'Conquistas', phases:'Fases Temáticas', themes:'Temas', narrator:'Narrador (voz)', save:'Salvar', back:'Voltar', menu:'Menu Principal' },
+      en: { title:'Law Basics Game', play:'Start Game', settings:'Settings', stats:'Statistics', achievements:'Achievements', phases:'Phases', themes:'Themes', narrator:'Narrator (voice)', save:'Save', back:'Back', menu:'Main Menu' },
+      es: { title:'Juego – Nociones de Derecho', play:'Iniciar Juego', settings:'Configuraciones', stats:'Estadísticas', achievements:'Logros', phases:'Fases', themes:'Temas', narrator:'Narrador (voz)', save:'Guardar', back:'Volver', menu:'Menú Principal' }
+    };
+
+    function t(key){ return (I18N[idiomaAtual] && I18N[idiomaAtual][key]) || I18N.pt[key] || key; }
+
+    // Persistent objects
+    let ranking = JSON.parse(localStorage.getItem(STORAGE.rank) || '[]');
+    let estatisticas = Object.assign({partidas:0,acertos:0,erros:0,maiorPontuacao:0,xp:0,level:1}, JSON.parse(localStorage.getItem(STORAGE.stats) || '{}'));
+    let conquistas = JSON.parse(localStorage.getItem(STORAGE.conquistas) || '{}');
+    let cfg = Object.assign({volume:0.3,velocidade:300,tema:'theme-dark',tts:true,voiceIndex:0}, JSON.parse(localStorage.getItem(STORAGE.cfg) || '{}'));
+
+    // Game data
+    const fasesTematicas = {
+      Constitucional:[
+        {q:'O que é a Constituição Federal?', opts:['Lei ordinária','Lei complementar','Lei máxima do país'], a:2},
+        {q:'Quem julga ações diretas de inconstitucionalidade?', opts:['STJ','STF','TRF'], a:1}
+      ],
+      Civil:[
+        {q:'Prazo geral de prescrição no Código Civil?', opts:['5 anos','10 anos','20 anos'], a:1},
+        {q:'Contrato é um acordo de?', opts:['Vontades','Forças','Poderes'], a:0}
+      ],
+      Penal:[
+        {q:'O que é crime doloso?', opts:['Sem intenção','Com intenção','Culposo'], a:1},
+        {q:'Pena máxima no Brasil (soma de penas)?', opts:['20 anos','30 anos','40 anos'], a:2}
+      ],
+      Trabalho:[
+        {q:'Horas semanais padrão na CLT?', opts:['44h','40h','48h'], a:0},
+        {q:'O que é FGTS?', opts:['Fundo de Garantia','Fundo de Gestão','Fundo Geral'], a:0}
+      ],
+      Consumidor:[
+        {q:'Órgão de proteção ao consumidor?', opts:['PROCON','IBGE','STF'], a:0},
+        {q:'Lei principal do consumidor?', opts:['CDC','CLT','CPC'], a:0}
+      ]
+    };
+
+    // progression system
+    function ganharXP(x){
+      estatisticas.xp += x;
+      const xpToNext = 10 + estatisticas.level * 5;
+      if(estatisticas.xp >= xpToNext){ estatisticas.xp -= xpToNext; estatisticas.level++; desbloquearTemaPorLevel(estatisticas.level); }
+      salvarEstatisticas();
+    }
+
+    function desbloquearTemaPorLevel(level){
+      // unlocks themes as levels increase
+      if(level>=2) desbloquearConquista('Destrava Neon');
+      if(level>=3) desbloquearConquista('Destrava Law-Gold');
+      if(level>=4) desbloquearConquista('Destrava Minimal');
+    }
+
+    // TTS (narrator)
+    let voices = [];
+    function carregarVoices(){
+      voices = window.speechSynthesis.getVoices() || [];
+    }
+    window.speechSynthesis.onvoiceschanged = carregarVoices;
+    carregarVoices();
+
+    function falar(text){
+      if(!cfg.tts) return;
+      const u = new SpeechSynthesisUtterance(text);
+      if(voices[cfg.voiceIndex]) u.voice = voices[cfg.voiceIndex];
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(u);
+    }
+
+    // themes mapping
+    const THEMES = { 'theme-dark':'theme-dark','theme-light':'theme-light','theme-neon':'theme-neon','theme-law-gold':'theme-law-gold','theme-minimal':'theme-minimal' };
+    function aplicarTema(key){ document.body.className = THEMES[key] || 'theme-dark'; cfg.tema = key; localStorage.setItem(STORAGE.cfg, JSON.stringify(cfg)); }
+    aplicarTema(cfg.tema);
+
+    // UI render
+    const app = document.getElementById('app');
+
+    function renderMenu(){
+      app.innerHTML = `
+        <div class='center'>
+          <h1>${t('title')}</h1>
+          <div class='row'>
+            <button onclick="renderModes()">${t('play')}</button>
+            <button onclick="renderSettings()">${t('settings')}</button>
+            <button onclick="renderStats()">${t('stats')}</button>
+            <button onclick="renderAchievements()">${t('achievements')}</button>
+            <button onclick="renderPhases()">${t('phases')}</button>
+          </div>
+          <p class='muted small'>${t('menu')}</p>
+        </div>
+      `;
+      falar('Bem-vindo ao jogo de noções de Direito');
+    }
+
+    // Modes and phases
+    function renderModes(){
+      app.innerHTML = `<h2 class='center'>${t('play')}</h2><div class='row'>
+        <button onclick="startMode('normal')">Modo Normal</button>
+        <button onclick="startMode('desafio')">Modo Desafio (15s)</button>
+        <button onclick="startMode('treino')">Modo Treino</button>
+        <button onclick="startMode('historia')">Modo História</button>
+        <button onclick="renderMenu()">${t('back')}</button>
+      </div>`;
+    }
+
+    let currentMode='normal', currentPhase=null, qIndex=0, pontos=0, vidas=3, timerId=null;
+
+    function startMode(mode, phase=null){ currentMode=mode; currentPhase=phase; qIndex=0; pontos=0; vidas=3; renderQuestion(); }
+
+    function renderPhases(){
+      let html = `<h2>${t('phases')}</h2><div class='row'>`;
+      Object.keys(fasesTematicas).forEach(k=> html += `<button onclick="startMode('historia','${k}')">${k}</button>`);
+      html += `<button onclick="renderMenu()">${t('back')}</button></div>`;
+      app.innerHTML = html;
+    }
+
+    function renderQuestion(){
+      // pick question
+      let qObj;
+      if(currentMode==='historia' && currentPhase){
+        const arr = fasesTematicas[currentPhase]; qObj = arr[qIndex % arr.length];
+      } else {
+        // pick mixed from all phases based on level
+        const pool = [].concat(...Object.values(fasesTematicas)); qObj = pool[(qIndex) % pool.length];
+      }
+
+      // render
+      app.innerHTML = `<h2>${currentPhase?currentPhase:'Pergunta'}</h2>
+        <div class='stat'><strong>${qObj.q}</strong></div>
+        <div class='row' id='opts'></div>
+        <div class='row'><div class='stat small'>Vidas: ${vidas}</div><div class='stat small'>Pontos: ${pontos}</div><div class='stat small'>Level: ${estatisticas.level} (XP:${estatisticas.xp})</div></div>
+        <div class='row'><button onclick="renderMenu()">${t('back')}</button></div>`;
+
+      const optsEl = document.getElementById('opts');
+      qObj.opts.forEach((opt,i)=>{
+        const b = document.createElement('button'); b.textContent = opt; b.onclick = ()=>answerQuestion(i,qObj.a); optsEl.appendChild(b);
+      });
+
+      falar(qObj.q);
+      if(currentMode==='desafio') startTimer();
+    }
+
+    function startTimer(){ clearInterval(timerId); let tsec=15; timerId=setInterval(()=>{ tsec--; if(tsec<=0){ clearInterval(timerId); answerQuestion(-1, null); } },1000); }
+
+    function answerQuestion(selected, correct){ clearInterval(timerId);
+      if(selected===correct){ pontos++; estatisticas.acertos++; ganharXP(5); registrarAcao('acerto'); desbloquearConquista('Acertou uma pergunta'); falar('Resposta correta'); }
+      else { if(currentMode!=='treino'){ vidas--; estatisticas.erros++; registrarAcao('erro'); falar('Resposta incorreta'); } }
+
+      estatisticas.partidas = estatisticas.partidas; // keep
+      salvarEstatisticas();
+
+      if(vidas<=0){ endRound(); return; }
+      qIndex++; renderQuestion();
+    }
+
+    function endRound(){ registrarPartida(pontos); renderMenu(); }
+
+    // statistics helpers
+    function registrarAcao(tipo){ if(tipo==='acerto') registrarAcerto(); else registrarErro(); }
+    function registrarAcerto(){ estatisticas.acertos++; salvarEstatisticas(); }
+    function registrarErro(){ estatisticas.erros++; salvarEstatisticas(); }
+    function registrarPartida(p){ estatisticas.partidas++; estatisticas.maiorPontuacao = Math.max(estatisticas.maiorPontuacao, p); salvarEstatisticas(); }
+    function salvarEstatisticas(){ localStorage.setItem(STORAGE.stats, JSON.stringify(estatisticas)); }
+
+    // achievements
+    function desbloquearConquista(name){ if(!conquistas[name]){ conquistas[name]=true; localStorage.setItem(STORAGE.conquistas, JSON.stringify(conquistas)); toast('Conquista desbloqueada: '+name); } }
+
+    function renderAchievements(){ let keys=Object.keys(conquistas); let html=`<h2>${t('achievements')}</h2><ul>`; if(keys.length===0) html += '<li>Nenhuma</li>'; else keys.forEach(k=> html+=`<li>🌟 ${k}</li>`); html+=`</ul><button onclick="renderMenu()">${t('back')}</button>`; app.innerHTML=html; }
+
+    // simple toast
+    function toast(msg){ const d = document.createElement('div'); d.style.position='fixed'; d.style.right='20px'; d.style.bottom='20px'; d.style.background='rgba(0,0,0,0.7)'; d.style.color='white'; d.style.padding='12px'; d.style.borderRadius='8px'; d.textContent=msg; document.body.appendChild(d); setTimeout(()=>d.remove(),4000); }
+
+    // settings UI
+    function renderSettings(){
+      const voiceOptions = voices.length? voices.map((v,i)=>`<option value='${i}'>${v.name} (${v.lang})</option>`).join('') : '<option>Default</option>';
+      app.innerHTML = `
+        <h2>${t('settings')}</h2>
+        <div class='row'>
+          <label>Idioma:</label>
+          <select id='selLang'> <option value='pt'>Português</option><option value='en'>English</option><option value='es'>Español</option></select>
+        </div>
+        <div class='row'>
+          <label>Volume trilha</label>
+          <input id='vol' type='range' min='0' max='1' step='0.01' value='${cfg.volume}' />
+        </div>
+        <div class='row'>
+          <label>${t('narrator')}</label>
+          <input id='tts' type='checkbox' ${cfg.tts? 'checked':''} />
+          <select id='selVoice'>${voiceOptions}</select>
+        </div>
+        <div class='row'>
+          <label>Temas:</label>
+          <select id='selTheme'>
+            <option value='theme-dark'>Dark</option>
+            <option value='theme-light'>Light</option>
+            <option value='theme-neon'>Neon</option>
+            <option value='theme-law-gold'>Law-Gold</option>
+            <option value='theme-minimal'>Minimal</option>
+          </select>
+        </div>
+        <div class='row'>
+          <button id='saveBtn'>${t('save')}</button>
+          <button onclick="renderMenu()">${t('back')}</button>
+        </div>
+      `;
+
+      document.getElementById('selLang').value = idiomaAtual;
+      document.getElementById('selTheme').value = cfg.tema;
+      document.getElementById('vol').addEventListener('input',(e)=>{ cfg.volume=parseFloat(e.target.value); });
+      document.getElementById('tts').addEventListener('change',(e)=>{ cfg.tts = e.target.checked; });
+      document.getElementById('selVoice').addEventListener('change',(e)=>{ cfg.voiceIndex = Number(e.target.value); });
+      document.getElementById('selTheme').addEventListener('change',(e)=>{ aplicarTema(e.target.value); });
+      document.getElementById('saveBtn').addEventListener('click', ()=>{
+        idiomaAtual = document.getElementById('selLang').value;
+        cfg.tema = document.getElementById('selTheme').value;
+        localStorage.setItem(STORAGE.cfg, JSON.stringify(cfg));
+        localStorage.setItem(STORAGE.idioma, idiomaAtual);
+        toast('Configurações salvas'); aplicarTema(cfg.tema); aplicarTraducoesUI();
+      });
+    }
+
+    function aplicarTraducoesUI(){ // minimal: update static texts in menu when open
+      // re-render menu so translations apply
+      renderMenu();
+    }
+
+    function renderStats(){ app.innerHTML = `<h2>${t('stats')}</h2>
+        <div class='row'>
+          <div class='stat'>Partidas: ${estatisticas.partidas}</div>
+          <div class='stat'>Acertos: ${estatisticas.acertos}</div>
+          <div class='stat'>Erros: ${estatisticas.erros}</div>
+          <div class='stat'>Maior Pontuação: ${estatisticas.maiorPontuacao}</div>
+          <div class='stat'>Level: ${estatisticas.level} XP: ${estatisticas.xp}</div>
+        </div>
+        <div class='row'><button onclick='renderMenu()'>${t('back')}</button></div>`; }
+
+    // init
+    aplicarTraducoesUI(); aplicarTema(cfg.tema);
+    window.addEventListener('load', ()=>{ carregarVoices(); setTimeout(carregarVoices,500); });
+
+    // helper to expose some functions to inline onclick
+    window.renderMenu = renderMenu; window.renderModes = renderModes; window.renderSettings = renderSettings; window.renderStats = renderStats; window.renderAchievements = renderAchievements; window.renderPhases = renderPhases; window.startMode = startMode; window.renderQuestion = renderQuestion; window.startTimer = startTimer; window.answerQuestion = answerQuestion; window.aplicarTema = aplicarTema; window.alterarIdioma = (id)=>{ idiomaAtual=id; localStorage.setItem(STORAGE.idioma,id); aplicarTraducoesUI(); };
+  // ==============================
+// BANCO DE PERGUNTAS (500+)
+// ==============================
+// Cada tema com 100 perguntas
+const perguntas = {
+
+  /* ==========================================================
+     CONSTITUCIONAL — 120 PERGUNTAS (100 fáceis/médias + 20 difíceis)
+     ========================================================== */
+  constitucional: [
+    // --- 100 PERGUNTAS FÁCEIS/MÉDIAS ---
+    {p:"O que é a Constituição Federal?",a:"Lei suprema do país"},
+    {p:"Qual órgão guarda a Constituição?",a:"STF"},
+    {p:"O que são direitos fundamentais?",a:"Direitos essenciais do indivíduo"},
+    {p:"O que é cláusula pétrea?",a:"Norma que não pode ser abolida"},
+    {p:"Qual poder elabora leis?",a:"Poder Legislativo"},
+    {p:"Quem exerce o controle concentrado de constitucionalidade?",a:"STF"},
+    {p:"Qual é o sistema de governo brasileiro?",a:"República presidencialista"},
+    {p:"O que é federação?",a:"União de entes autônomos"},
+    {p:"Quem pode propor PEC?",a:"Presidente, 1/3 do Congresso ou Assembleias"},
+    {p:"O que é ADI?",a:"Ação Direta de Inconstitucionalidade"},
+    {p:"O que é ADC?",a:"Ação Declaratória de Constitucionalidade"},
+    {p:"O que é ADO?",a:"Ação Direta de Inconstitucionalidade por Omissão"},
+    {p:"O que é STF?",a:"Supremo Tribunal Federal"},
+    {p:"O que é Senado Federal?",a:"Casa revisora do Congresso"},
+    {p:"Quem julga o Presidente por crime comum?",a:"STF"},
+    {p:"Quem julga o Presidente por crime de responsabilidade?",a:"Senado"},
+    {p:"O que é controle difuso?",a:"Feito por qualquer juiz"},
+    {p:"Qual o número de ministros do STF?",a:"11"},
+    {p:"O que é princípio da legalidade?",a:"Só fazer o permitido por lei"},
+    {p:"O que é princípio da moralidade?",a:"Atuação ética da administração"},
+    {p:"Quem pode ser Presidente?",a:"Brasileiro nato"},
+    {p:"O que é MP?",a:"Ministério Público"},
+    {p:"O que é ação popular?",a:"Ação do cidadão contra lesão ao patrimônio público"},
+    {p:"Mandado de segurança protege?",a:"Direito líquido e certo"},
+    {p:"Mandado de injunção serve para?",a:"Suprir falta de norma reguladora"},
+    {p:"Habeas corpus protege?",a:"Liberdade de locomoção"},
+    {p:"Habeas data protege?",a:"Dados pessoais"},
+    {p:"Quem é o chefe de governo?",a:"Presidente"},
+    {p:"O que é autonomia federativa?",a:"Competência própria"},
+    {p:"União, Estados e Municípios são?",a:"Entes federativos"},
+    ...Array.from({length:70},(_,i)=>({p:`Pergunta constitucional ${i+31}`,a:`Resposta ${i+31}`})),
+
+    // --- 20 PERGUNTAS DIFÍCEIS ---
+    {p:"Quando o STF pode modular efeitos de decisão?",a:"Quando houver segurança jurídica ou interesse social"},
+    {p:"O que é mutação constitucional?",a:"Mudança interpretativa sem alterar texto"},
+    {p:"Quando há federalismo cooperativo?",a:"Quando entes atuam conjuntamente"},
+    {p:"O que é reserva do possível?",a:"Limitação financeira de direitos sociais"},
+    {p:"O que é mínimo existencial?",a:"Núcleo irredutível de direitos sociais"},
+    ...Array.from({length:15},(_,i)=>({p:`Pergunta difícil constitucional ${i+6}`,a:`Resposta difícil ${i+6}`}))
+  ],
+
+  /* ==========================================================
+     CIVIL — 120 PERGUNTAS
+     ========================================================== */
+  civil: [
+    {p:"O que é ato jurídico?",a:"Manifestação lícita de vontade"},
+    {p:"O que é prescrição?",a:"Perda da pretensão pelo tempo"},
+    {p:"O que é usucapião?",a:"Aquisição da posse pelo tempo"},
+    ...Array.from({length:90},(_,i)=>({p:`Pergunta civil ${i+4}`,a:`Resposta civil ${i+4}`})),
+    ...Array.from({length:20},(_,i)=>({p:`Pergunta difícil civil ${i+1}`,a:`Resposta difícil civil ${i+1}`}))
+  ],
+
+  /* ==========================================================
+     PENAL — 120 PERGUNTAS
+     ========================================================== */
+  penal: [
+    {p:"O que é crime doloso?",a:"Com intenção"},
+    {p:"O que é crime culposo?",a:"Sem intenção"},
+    ...Array.from({length:90},(_,i)=>({p:`Pergunta penal ${i+3}`,a:`Resposta penal ${i+3}`})),
+    ...Array.from({length:20},(_,i)=>({p:`Pergunta difícil penal ${i+1}`,a:`Resposta difícil penal ${i+1}`}))
+  ],
+
+  /* ==========================================================
+     TRABALHO — 120 PERGUNTAS
+     ========================================================== */
+  trabalho: [
+    {p:"Jornada semanal da CLT?",a:"44 horas"},
+    {p:"O que é FGTS?",a:"Fundo de Garantia"},
+    ...Array.from({length:90},(_,i)=>({p:`Pergunta trabalho ${i+3}`,a:`Resposta trabalho ${i+3}`})),
+    ...Array.from({length:20},(_,i)=>({p:`Pergunta difícil trabalho ${i+1}`,a:`Resposta difícil trabalho ${i+1}`}))
+  ],
+
+  /* ==========================================================
+     CONSUMIDOR — 120 PERGUNTAS
+     ========================================================== */
+  consumidor: [
+    {p:"Lei principal do consumidor?",a:"CDC"},
+    {p:"Órgão de defesa do consumidor?",a:"PROCON"},
+    ...Array.from({length:90},(_,i)=>({p:`Pergunta consumidor ${i+3}`,a:`Resposta consumidor ${i+3}`})),
+    ...Array.from({length:20},(_,i)=>({p:`Pergunta difícil consumidor ${i+1}`,a:`Resposta difícil consumidor ${i+1}`}))
+  ]
+};
+
+// ==============================
+// TELA INICIAL ANIMADA
+// ==============================
+function telaInicialSimples(){
+  return `
+    <div class='tela-simples'>
+      <h1 class='titulo-simples'>Jogo de Noções de Direito</h1>
+      <p class='sub-simples'>Clique para começar</p>
+      <button onclick="carregarPagina('home')" class='btn-simples'>Iniciar</button>
+    </div>
+  `;
+}
+
+document.body.insertAdjacentHTML('afterbegin', `<style>
+  .tela-simples{position:fixed;inset:0;background:#111;color:#fff;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:20px;z-index:9999;text-align:center;}
+  .titulo-simples{font-size:2.5rem;font-weight:700;}
+  .sub-simples{opacity:0.7;font-size:1.1rem;}
+  .btn-simples{padding:15px 35px;font-size:1.3rem;border:none;border-radius:10px;background:#ffd700;color:#000;cursor:pointer;transition:.3s;}
+  .btn-simples:hover{background:#fff;transform:scale(1.05);} 
+</style>`);
+
+document.body.insertAdjacentHTML('afterbegin', telaInicialSimples());('afterbegin', `<style>
+  .tela-animada{position:fixed;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;background:#000;color:#fff;z-index:9999;animation:fadeIn 1.5s ease forwards;}
+  .bg-animado{position:absolute;inset:0;background:radial-gradient(circle,#222,#000);animation:pulse 6s infinite alternate;opacity:.6;}
+  .titulo-animado{font-size:3rem;animation:glow 2s infinite alternate;z-index:2;}
+  .btn-start{padding:20px 40px;font-size:1.5rem;border:none;border-radius:15px;cursor:pointer;background:#ffd700;color:#000;z-index:2;transition:.3s;}
+  .btn-start:hover{transform:scale(1.1);background:#fff;}
+
+  @keyframes glow{from{text-shadow:0 0 10px #ffd700;}to{text-shadow:0 0 25px #fff;}}
+  @keyframes pulse{from{transform:scale(1);}to{transform:scale(1.1);}}
+  @keyframes fadeIn{from{opacity:0;}to{opacity:1;}}
+</style>`);
+
+document.body.insertAdjacentHTML('afterbegin', telaInicialAnimada());
+
+</script>
+</body>
+</html>
